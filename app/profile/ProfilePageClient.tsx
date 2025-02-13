@@ -3,10 +3,20 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { MapPin, Link2, Calendar, Globe, Twitter, Instagram } from 'lucide-react';
+import { MapPin, Link2, Calendar, Globe, Twitter, Instagram, ThumbsUp, MessageSquare, MoreVertical, Pencil, Trash2 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { format } from 'date-fns';
+import { formatDistanceToNow } from 'date-fns';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { toast } from 'sonner';
+import { useRouter } from 'next/navigation';
 
 interface Profile {
   id: string;
@@ -23,6 +33,9 @@ interface Profile {
 export default function ProfilePageClient({ profile }: { profile: Profile }) {
   const [posts, setPosts] = useState<any[]>([]);
   const [routes, setRoutes] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const router = useRouter();
 
   useEffect(() => {
     const fetchUserContent = async () => {
@@ -45,6 +58,87 @@ export default function ProfilePageClient({ profile }: { profile: Profile }) {
 
     fetchUserContent();
   }, [profile.id]);
+
+  useEffect(() => {
+    const fetchCurrentUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      setCurrentUser(user);
+    };
+    fetchCurrentUser();
+  }, []);
+
+  const fetchUserPosts = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('posts')
+        .select(`
+          *,
+          profiles:user_id (
+            username,
+            avatar_url,
+            full_name
+          )
+        `)
+        .eq('user_id', profile.id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      const transformedPosts = data?.map((post) => {
+        if (post.image_urls && post.image_urls.length > 0) {
+          const publicUrls = post.image_urls.map((fileName: string) => {
+            const { data: { publicUrl } } = supabase.storage
+              .from('posts')
+              .getPublicUrl(fileName);
+            return publicUrl;
+          });
+          return { ...post, image_urls: publicUrls };
+        }
+        return post;
+      }) || [];
+
+      setPosts(transformedPosts);
+    } catch (error) {
+      console.error('Error fetching user posts:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDelete = async (postId: string) => {
+    try {
+      const { data: post } = await supabase
+        .from('posts')
+        .select('image_urls')
+        .eq('id', postId)
+        .single();
+
+      if (post?.image_urls) {
+        for (const fileName of post.image_urls) {
+          const { error: storageError } = await supabase.storage
+            .from('posts')
+            .remove([fileName]);
+          
+          if (storageError) {
+            console.error('Error deleting image:', storageError);
+          }
+        }
+      }
+
+      const { error } = await supabase
+        .from('posts')
+        .delete()
+        .eq('id', postId);
+
+      if (error) throw error;
+      
+      toast.success('Post deleted successfully');
+      await fetchUserPosts(); // Fetch fresh data after deletion
+    } catch (error) {
+      console.error('Error deleting post:', error);
+      toast.error('Error deleting post');
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -143,27 +237,69 @@ export default function ProfilePageClient({ profile }: { profile: Profile }) {
           </TabsList>
           
           <TabsContent value="posts" className="space-y-4">
-            {posts.map((post) => (
-              <Card key={post.id}>
-                <CardContent className="p-6">
-                  <div className="flex items-start gap-4">
-                    <Avatar className="h-10 w-10">
-                      <AvatarImage src={post.profiles.avatar_url} />
-                      <AvatarFallback>{post.profiles.username?.slice(0, 2).toUpperCase()}</AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold">{post.profiles.username}</span>
-                        <span className="text-sm text-muted-foreground">
-                          {format(new Date(post.created_at), 'MMM d, yyyy')}
-                        </span>
-                      </div>
-                      <p className="text-foreground/90">{post.content}</p>
+            {loading ? (
+              <div className="text-center text-muted-foreground">Loading posts...</div>
+            ) : posts.length === 0 ? (
+              <div className="text-center text-muted-foreground">No posts yet</div>
+            ) : (
+              posts.map((post) => (
+                <Card key={post.id} className="p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <MapPin className="w-4 h-4" />
+                      {post.location}
+                      <span className="mx-2">•</span>
+                      {formatDistanceToNow(new Date(post.created_at), { addSuffix: true })}
                     </div>
+                    {currentUser && currentUser.id === profile.id && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="sm">
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => router.push(`/community/edit/${post.id}`)}>
+                            <Pencil className="w-4 h-4 mr-2" />
+                            Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem 
+                            className="text-destructive"
+                            onClick={() => handleDelete(post.id)}
+                          >
+                            <Trash2 className="w-4 h-4 mr-2" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
                   </div>
-                </CardContent>
-              </Card>
-            ))}
+                  <p className="mb-4 whitespace-pre-wrap">{post.content}</p>
+                  {post.image_urls && post.image_urls.length > 0 && (
+                    <div className="grid gap-2 mb-4">
+                      {post.image_urls.map((url: string, index: number) => (
+                        <img
+                          key={index}
+                          src={url}
+                          alt={`Post image ${index + 1}`}
+                          className="w-full rounded-lg object-cover max-h-96"
+                        />
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex gap-4">
+                    <Button variant="ghost" size="sm">
+                      <ThumbsUp className="w-4 h-4 mr-2" />
+                      {post.likes_count || 0}
+                    </Button>
+                    <Button variant="ghost" size="sm">
+                      <MessageSquare className="w-4 h-4 mr-2" />
+                      {post.comments_count || 0}
+                    </Button>
+                  </div>
+                </Card>
+              ))
+            )}
           </TabsContent>
           
           <TabsContent value="routes" className="space-y-4">
