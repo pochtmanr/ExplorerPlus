@@ -17,6 +17,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { Upload } from 'lucide-react';
 
 export default function SettingsPage() {
   const [user, setUser] = useState<any>(null);
@@ -112,8 +113,92 @@ export default function SettingsPage() {
     fetchData();
   }, []);
 
-  const handleUpdateProfile = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const uploadImage = async (file: File, bucket: 'avatars' | 'banners') => {
+    try {
+      if (!user) throw new Error('No user');
+
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${user.id}/${Math.random()}.${fileExt}`;
+
+      // Upload image
+      const { error: uploadError } = await supabase.storage
+        .from(bucket)
+        .upload(fileName, file);
+
+      if (uploadError) throw uploadError;
+
+      // Get URL
+      const { data: { publicUrl } } = supabase.storage
+        .from(bucket)
+        .getPublicUrl(fileName);
+
+      // Update profile
+      await supabase
+        .from('profiles')
+        .update({
+          [`${bucket === 'avatars' ? 'avatar_url' : 'banner_url'}`]: publicUrl
+        })
+        .eq('id', user.id);
+
+      return publicUrl;
+    } catch (error) {
+      console.error('Upload error:', error);
+      throw error;
+    }
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'avatar' | 'banner') => {
+    try {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      // Check file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        throw new Error('File size must be less than 5MB');
+      }
+
+      // Check file type
+      if (!file.type.startsWith('image/')) {
+        throw new Error('File must be an image');
+      }
+
+      setLoading(true);
+      const bucket = type === 'avatar' ? 'avatars' : 'banners';
+      const publicUrl = await uploadImage(file, bucket);
+
+      // Update profile state
+      setProfile(prev => ({
+        ...prev,
+        [type === 'avatar' ? 'avatar_url' : 'banner_url']: publicUrl
+      }));
+
+      // Update profile in database
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({
+          [type === 'avatar' ? 'avatar_url' : 'banner_url']: publicUrl,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', user.id);
+
+      if (updateError) throw updateError;
+
+      toast.success(`${type === 'avatar' ? 'Profile picture' : 'Banner'} updated successfully`);
+      router.refresh(); // Force refresh to update the UI
+    } catch (error: any) {
+      toast.error(error.message || `Error uploading ${type}`);
+      console.error('Image upload error:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUpdateProfile = async (
+    e?: React.FormEvent, 
+    newImageUrl?: string, 
+    imageType?: 'avatar' | 'banner'
+  ) => {
+    if (e) e.preventDefault();
     setLoading(true);
 
     try {
@@ -122,45 +207,37 @@ export default function SettingsPage() {
       }
 
       // Check if username is taken by another user
-      const { data: existingUser, error: checkError } = await supabase
+      const { data: existingUsers, error: checkError } = await supabase
         .from('profiles')
         .select('id')
         .eq('username', profile.username)
-        .neq('id', user.id)
-        .single();
+        .neq('id', user.id);
 
-      if (existingUser) {
+      if (checkError) throw checkError;
+      
+      if (existingUsers && existingUsers.length > 0) {
         throw new Error('Username is already taken');
       }
 
-      // Update profile using upsert
+      const updateData = imageType ? {
+        ...profile,
+        [`${imageType}_url`]: newImageUrl
+      } : profile;
+
       const { error: updateError } = await supabase
         .from('profiles')
         .upsert({
           id: user.id,
-          username: profile.username,
-          full_name: profile.full_name,
-          avatar_url: profile.avatar_url,
-          banner_url: profile.banner_url,
-          bio: profile.bio,
-          location: profile.location,
-          website: profile.website,
-          social_links: profile.social_links,
+          ...updateData,
           updated_at: new Date().toISOString()
-        }, {
-          onConflict: 'id'
         });
 
-      if (updateError) {
-        console.error('Update error:', updateError);
-        throw new Error('Error updating profile');
-      }
+      if (updateError) throw updateError;
 
-      toast.success('Profile updated successfully');
+      if (!imageType) toast.success('Profile updated successfully');
       router.refresh();
     } catch (error: any) {
       toast.error(error.message || 'Error updating profile');
-      console.error('Profile update error:', error);
     } finally {
       setLoading(false);
     }
@@ -247,6 +324,47 @@ export default function SettingsPage() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleUpdateProfile} className="space-y-6">
+              <div className="space-y-6">
+                <div className="space-y-2">
+                  <Label>Profile Picture</Label>
+                  <div className="flex items-center gap-4">
+                    <Avatar className="h-20 w-20">
+                      <AvatarImage src={profile.avatar_url} />
+                      <AvatarFallback>{profile.username?.slice(0, 2).toUpperCase()}</AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1">
+                      <Input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => handleImageUpload(e, 'avatar')}
+                        className="cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Banner Image</Label>
+                  <div className="space-y-2">
+                    {profile.banner_url && (
+                      <div className="relative h-32 rounded-lg overflow-hidden">
+                        <img 
+                          src={profile.banner_url} 
+                          alt="Banner preview" 
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                    )}
+                    <Input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => handleImageUpload(e, 'banner')}
+                      className="cursor-pointer"
+                    />
+                  </div>
+                </div>
+              </div>
+
               <div className="space-y-2">
                 <Label>Username</Label>
                 <Input
@@ -287,22 +405,6 @@ export default function SettingsPage() {
                   value={profile.website}
                   onChange={(e) => setProfile({...profile, website: e.target.value})}
                   type="url"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Avatar URL</Label>
-                <Input
-                  value={profile.avatar_url}
-                  onChange={(e) => setProfile({...profile, avatar_url: e.target.value})}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Banner URL</Label>
-                <Input
-                  value={profile.banner_url}
-                  onChange={(e) => setProfile({...profile, banner_url: e.target.value})}
                 />
               </div>
 

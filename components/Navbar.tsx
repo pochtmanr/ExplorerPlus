@@ -28,17 +28,26 @@ export function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { theme, setTheme } = useTheme();
   const [user, setUser] = useState<any>(null);
+  const [profile, setProfile] = useState<any>(null);
 
   useEffect(() => {
-    const fetchUser = async () => {
+    const fetchUserAndProfile = async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      setUser(user);
+      if (user) {
+        setUser(user);
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .single();
+        setProfile(profile);
+      }
     };
 
-    fetchUser();
+    fetchUserAndProfile();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
-      fetchUser();
+      fetchUserAndProfile();
     });
 
     return () => subscription?.unsubscribe();
@@ -64,14 +73,14 @@ export function Navbar() {
         </div>
         
         <div className="flex lg:hidden">
-          <button
-            type="button"
+          <Button
+            variant="ghost"
             className="-m-2.5 inline-flex items-center justify-center rounded-md p-2.5"
             onClick={() => setMobileMenuOpen(true)}
           >
             <span className="sr-only">Open main menu</span>
             <Menu className="h-6 w-6" aria-hidden="true" />
-          </button>
+          </Button>
         </div>
         
         <div className="hidden lg:flex lg:gap-x-8">
@@ -91,52 +100,71 @@ export function Navbar() {
           ))}
         </div>
         
-        <div className="hidden lg:flex lg:flex-1 lg:justify-end lg:gap-4">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-            className="mr-2"
-          >
-            <Sun className="h-5 w-5 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
-            <Moon className="absolute h-5 w-5 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
-            <span className="sr-only">Toggle theme</span>
-          </Button>
-          
-          {user ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="relative h-8 w-8 rounded-full">
-                  <Avatar className="h-8 w-8">
-                    <AvatarImage src={user.user_metadata.avatar_url} />
-                    <AvatarFallback>
-                      {user.email?.slice(0, 2).toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
+        <div className="hidden lg:flex lg:flex-1 lg:justify-end lg:items-center">
+          <div className="flex items-center gap-4">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              className="h-9 w-9 px-0"
+            >
+              <Sun className="h-[1.2rem] w-[1.2rem] rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
+              <Moon className="absolute h-[1.2rem] w-[1.2rem] rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+              <span className="sr-only">Toggle theme</span>
+            </Button>
+            
+            {user ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" className="h-9 w-9 p-0">
+                    <Avatar className="h-9 w-9">
+                      <AvatarImage src={user.user_metadata.avatar_url} />
+                      <AvatarFallback>
+                        {user.email?.slice(0, 2).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent 
+                  align="end" 
+                  className="w-[200px]"
+                  forceMount
+                >
+                  <DropdownMenuItem asChild>
+                    <Link 
+                      className="w-full cursor-pointer"
+                      href={`/profile/${profile?.username || `user_${user?.id?.slice(0, 8)}`}`}
+                    >
+                      Profile
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link 
+                      className="w-full cursor-pointer"
+                      href="/settings"
+                    >
+                      Settings
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem 
+                    className="cursor-pointer"
+                    onClick={handleLogout}
+                  >
+                    Logout
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <div className="flex items-center gap-4">
+                <Button variant="ghost" asChild>
+                  <Link href="/login">Log in</Link>
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem asChild>
-                  <Link href="/profile">Profile</Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link href="/settings">Settings</Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleLogout}>
-                  Logout
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : (
-            <>
-              <Button variant="ghost" asChild>
-                <Link href="/login">Log in</Link>
-              </Button>
-              <Button asChild>
-                <Link href="/register">Sign up</Link>
-              </Button>
-            </>
-          )}
+                <Button asChild>
+                  <Link href="/register">Sign up</Link>
+                </Button>
+              </div>
+            )}
+          </div>
         </div>
       </nav>
 
@@ -192,29 +220,52 @@ export function Navbar() {
                   <span className="ml-2">Toggle theme</span>
                 </Button>
                 {user ? (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" className="w-full justify-start">
-                        <Avatar className="h-8 w-8">
-                          <AvatarImage src={user.user_metadata.avatar_url} />
-                          <AvatarFallback>
-                            {user.email?.slice(0, 2).toUpperCase()}
-                          </AvatarFallback>
-                        </Avatar>
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem asChild>
-                        <Link href="/profile">Profile</Link>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem asChild>
-                        <Link href="/settings">Settings</Link>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={handleLogout}>
-                        Logout
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                  <div className="relative inline-block text-left">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button 
+                          variant="ghost" 
+                          className="h-8 w-8 rounded-full p-0"
+                        >
+                          <Avatar className="h-8 w-8">
+                            <AvatarImage src={user.user_metadata.avatar_url} />
+                            <AvatarFallback>
+                              {user.email?.slice(0, 2).toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent 
+                        align="end"
+                        alignOffset={0}
+                        className="w-[200px] p-0"
+                        forceMount
+                      >
+                        <DropdownMenuItem className="cursor-pointer focus:bg-accent" asChild>
+                          <Link 
+                            href={`/profile/${profile?.username || `user_${user?.id?.slice(0, 8)}`}`}
+                            className="w-full px-3 py-2"
+                          >
+                            Profile
+                          </Link>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem className="cursor-pointer focus:bg-accent" asChild>
+                          <Link 
+                            href="/settings" 
+                            className="w-full px-3 py-2"
+                          >
+                            Settings
+                          </Link>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem 
+                          className="cursor-pointer focus:bg-accent px-3 py-2"
+                          onClick={handleLogout}
+                        >
+                          Logout
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
                 ) : (
                   <>
                     <Button variant="ghost" asChild className="w-full">
