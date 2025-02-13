@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
+import CommentSection from '@/components/CommentSection';
 
 interface Profile {
   id: string;
@@ -35,29 +36,9 @@ export default function ProfilePageClient({ profile }: { profile: Profile }) {
   const [routes, setRoutes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [showComments, setShowComments] = useState<Record<string, boolean>>({});
+  const [comments, setComments] = useState<Record<string, any[]>>({});
   const router = useRouter();
-
-  useEffect(() => {
-    const fetchUserContent = async () => {
-      const [postsResponse, routesResponse] = await Promise.all([
-        supabase
-          .from('posts')
-          .select('*, profiles(username, avatar_url)')
-          .eq('user_id', profile.id)
-          .order('created_at', { ascending: false }),
-        supabase
-          .from('routes')
-          .select('*, profiles(username, avatar_url)')
-          .eq('user_id', profile.id)
-          .order('created_at', { ascending: false })
-      ]);
-
-      setPosts(postsResponse.data || []);
-      setRoutes(routesResponse.data || []);
-    };
-
-    fetchUserContent();
-  }, [profile.id]);
 
   useEffect(() => {
     const fetchCurrentUser = async () => {
@@ -67,7 +48,7 @@ export default function ProfilePageClient({ profile }: { profile: Profile }) {
     fetchCurrentUser();
   }, []);
 
-  const fetchUserPosts = async () => {
+  const fetchUserContent = async () => {
     try {
       const { data, error } = await supabase
         .from('posts')
@@ -77,14 +58,21 @@ export default function ProfilePageClient({ profile }: { profile: Profile }) {
             username,
             avatar_url,
             full_name
-          )
+          ),
+          likes:likes(user_id),
+          comments:comments(count)
         `)
         .eq('user_id', profile.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
 
+      // Transform the posts to include public URLs and likes info
       const transformedPosts = data?.map((post) => {
+        const userHasLiked = post.likes.some((like: any) => like.user_id === currentUser?.id);
+        const likesCount = post.likes.length;
+        const commentsCount = post.comments?.[0]?.count || 0;
+
         if (post.image_urls && post.image_urls.length > 0) {
           const publicUrls = post.image_urls.map((fileName: string) => {
             const { data: { publicUrl } } = supabase.storage
@@ -92,18 +80,101 @@ export default function ProfilePageClient({ profile }: { profile: Profile }) {
               .getPublicUrl(fileName);
             return publicUrl;
           });
-          return { ...post, image_urls: publicUrls };
+          return { 
+            ...post, 
+            image_urls: publicUrls,
+            user_has_liked: userHasLiked,
+            likes_count: likesCount,
+            comments_count: commentsCount
+          };
         }
-        return post;
+        return { 
+          ...post,
+          user_has_liked: userHasLiked,
+          likes_count: likesCount,
+          comments_count: commentsCount
+        };
       }) || [];
 
       setPosts(transformedPosts);
+
+      // Fetch routes
+      const { data: routesData, error: routesError } = await supabase
+        .from('routes')
+        .select('*, profiles(username, avatar_url)')
+        .eq('user_id', profile.id)
+        .order('created_at', { ascending: false });
+
+      if (routesError) throw routesError;
+      setRoutes(routesData || []);
     } catch (error) {
-      console.error('Error fetching user posts:', error);
+      console.error('Error fetching user content:', error);
     } finally {
       setLoading(false);
     }
   };
+
+  const fetchComments = async (postId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('comments')
+        .select(`
+          *,
+          profiles:user_id (
+            username,
+            avatar_url,
+            full_name
+          )
+        `)
+        .eq('post_id', postId)
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+      setComments(prev => ({ ...prev, [postId]: data }));
+    } catch (error) {
+      console.error('Error fetching comments:', error);
+    }
+  };
+
+  const handleLike = async (postId: string) => {
+    if (!currentUser) return;
+
+    try {
+      const { data: existingLike } = await supabase
+        .from('likes')
+        .select()
+        .eq('post_id', postId)
+        .eq('user_id', currentUser.id)
+        .single();
+
+      if (existingLike) {
+        // Unlike
+        await supabase
+          .from('likes')
+          .delete()
+          .eq('post_id', postId)
+          .eq('user_id', currentUser.id);
+      } else {
+        // Like
+        await supabase
+          .from('likes')
+          .insert({
+            post_id: postId,
+            user_id: currentUser.id
+          });
+      }
+
+      // Refresh posts to update like count
+      fetchUserContent();
+    } catch (error) {
+      console.error('Error toggling like:', error);
+      toast.error('Error updating like');
+    }
+  };
+
+  useEffect(() => {
+    fetchUserContent();
+  }, [profile.id]);
 
   const handleDelete = async (postId: string) => {
     try {
@@ -133,7 +204,7 @@ export default function ProfilePageClient({ profile }: { profile: Profile }) {
       if (error) throw error;
       
       toast.success('Post deleted successfully');
-      await fetchUserPosts(); // Fetch fresh data after deletion
+      await fetchUserContent(); // Fetch fresh data after deletion
     } catch (error) {
       console.error('Error deleting post:', error);
       toast.error('Error deleting post');
@@ -142,79 +213,79 @@ export default function ProfilePageClient({ profile }: { profile: Profile }) {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Banner */}
+      {/* Banner with gradient overlay */}
       <div className="relative h-48 md:h-64 bg-muted">
         {profile.banner_url ? (
-          <img 
-            src={profile.banner_url} 
-            alt="Profile banner"
-            className="w-full h-full object-cover"
-          />
+          <>
+            <img 
+              src={profile.banner_url} 
+              alt="Profile banner"
+              className="w-full h-full object-cover"
+            />
+            <div className="absolute inset-0 bg-gradient-to-b from-transparent to-background/90" />
+          </>
         ) : (
           <div className="w-full h-full bg-gradient-to-r from-primary/20 to-primary/10" />
         )}
       </div>
 
-      {/* Profile Info */}
+      {/* Profile Info with overlap */}
       <div className="container max-w-6xl mx-auto px-4">
-        <div className="relative -mt-20 mb-8">
-          <div className="flex flex-col md:flex-row gap-6 items-start">
-            <Avatar className="h-32 w-32 border-4 border-background">
-              <AvatarImage 
-                src={profile.avatar_url || ''} 
-                alt={profile.username}
-              />
-              <AvatarFallback>{profile.username?.slice(0, 2).toUpperCase()}</AvatarFallback>
-            </Avatar>
-            <div className="flex-1 space-y-4">
-              <div>
-                <h1 className="text-2xl font-bold">{profile.full_name || profile.username}</h1>
-                <p className="text-muted-foreground">@{profile.username}</p>
-              </div>
-              {profile.bio && (
-                <p className="text-foreground/90 max-w-2xl">{profile.bio}</p>
+        <div className="relative -mt-24">
+          <Avatar className="h-32 w-32 border-4 border-background ring-2 ring-border">
+            <AvatarImage 
+              src={profile.avatar_url || ''} 
+              alt={profile.username}
+            />
+            <AvatarFallback>{profile.username?.slice(0, 2).toUpperCase()}</AvatarFallback>
+          </Avatar>
+          
+          <div className="mt-4 mb-8">
+            <h1 className="text-2xl font-bold">{profile.full_name || profile.username}</h1>
+            <p className="text-muted-foreground">@{profile.username}</p>
+            {profile.bio && (
+              <p className="text-foreground/90 max-w-2xl mt-4">{profile.bio}</p>
+            )}
+            <div className="flex flex-wrap gap-4 text-sm text-muted-foreground mt-4">
+              {profile.location && (
+                <span className="flex items-center gap-1">
+                  <MapPin className="h-4 w-4" />
+                  {profile.location}
+                </span>
               )}
-              <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
-                {profile.location && (
-                  <span className="flex items-center gap-1">
-                    <MapPin className="h-4 w-4" />
-                    {profile.location}
-                  </span>
-                )}
-                {profile.website && (
-                  <a 
-                    href={profile.website}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1 hover:text-primary"
-                  >
-                    <Globe className="h-4 w-4" />
-                    Website
-                  </a>
-                )}
-                {profile.social_links?.twitter && (
-                  <a 
-                    href={profile.social_links.twitter}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1 hover:text-primary"
-                  >
-                    <Twitter className="h-4 w-4" />
-                    Twitter
-                  </a>
-                )}
-                {profile.social_links?.instagram && (
-                  <a 
-                    href={profile.social_links.instagram}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1 hover:text-primary"
-                  >
-                    <Instagram className="h-4 w-4" />
-                    Instagram
-                  </a>
-                )}
-              </div>
+              {profile.website && (
+                <a 
+                  href={profile.website}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 hover:text-primary"
+                >
+                  <Globe className="h-4 w-4" />
+                  Website
+                </a>
+              )}
+              {profile.social_links?.twitter && (
+                <a 
+                  href={profile.social_links.twitter}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 hover:text-primary"
+                >
+                  <Twitter className="h-4 w-4" />
+                  Twitter
+                </a>
+              )}
+              {profile.social_links?.instagram && (
+                <a 
+                  href={profile.social_links.instagram}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 hover:text-primary"
+                >
+                  <Instagram className="h-4 w-4" />
+                  Instagram
+                </a>
+              )}
             </div>
           </div>
         </div>
@@ -288,15 +359,43 @@ export default function ProfilePageClient({ profile }: { profile: Profile }) {
                     </div>
                   )}
                   <div className="flex gap-4">
-                    <Button variant="ghost" size="sm">
-                      <ThumbsUp className="w-4 h-4 mr-2" />
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      onClick={() => handleLike(post.id)}
+                    >
+                      <ThumbsUp 
+                        className={`w-4 h-4 mr-2 ${post.user_has_liked ? 'fill-current' : ''}`} 
+                      />
                       {post.likes_count || 0}
                     </Button>
-                    <Button variant="ghost" size="sm">
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      onClick={() => {
+                        setShowComments(prev => ({ ...prev, [post.id]: !prev[post.id] }));
+                        if (!comments[post.id]) {
+                          fetchComments(post.id);
+                        }
+                      }}
+                    >
                       <MessageSquare className="w-4 h-4 mr-2" />
                       {post.comments_count || 0}
                     </Button>
                   </div>
+                  {showComments[post.id] && (
+                    <div className="mt-4">
+                      <CommentSection
+                        postId={post.id}
+                        currentUser={currentUser}
+                        comments={comments[post.id] || []}
+                        onCommentAdded={() => {
+                          fetchComments(post.id);
+                          fetchUserContent(); // Refresh post to update comment count
+                        }}
+                      />
+                    </div>
+                  )}
                 </Card>
               ))
             )}

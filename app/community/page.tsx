@@ -16,12 +16,71 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
+import CommentSection from '@/components/CommentSection';
 
 export default function CommunityPage() {
   const [posts, setPosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [showComments, setShowComments] = useState<Record<string, boolean>>({});
+  const [comments, setComments] = useState<Record<string, any[]>>({});
+  const [popularExplorers, setPopularExplorers] = useState<any[]>([]);
   const router = useRouter();
+
+  const fetchPosts = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('posts')
+        .select(`
+          *,
+          profiles:user_id (
+            username,
+            avatar_url,
+            full_name
+          ),
+          likes:likes(user_id),
+          comments:comments(count)
+        `)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      // Transform the posts to include public URLs and likes info
+      const transformedPosts = data?.map((post) => {
+        const userHasLiked = post.likes.some((like: any) => like.user_id === currentUser?.id);
+        const likesCount = post.likes.length;
+        const commentsCount = post.comments?.[0]?.count || 0;
+
+        if (post.image_urls && post.image_urls.length > 0) {
+          const publicUrls = post.image_urls.map((fileName: string) => {
+            const { data: { publicUrl } } = supabase.storage
+              .from('posts')
+              .getPublicUrl(fileName);
+            return publicUrl;
+          });
+          return { 
+            ...post, 
+            image_urls: publicUrls,
+            user_has_liked: userHasLiked,
+            likes_count: likesCount,
+            comments_count: commentsCount
+          };
+        }
+        return { 
+          ...post,
+          user_has_liked: userHasLiked,
+          likes_count: likesCount,
+          comments_count: commentsCount
+        };
+      }) || [];
+
+      setPosts(transformedPosts);
+    } catch (error) {
+      console.error('Error fetching posts:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     const fetchCurrentUser = async () => {
@@ -32,57 +91,75 @@ export default function CommunityPage() {
   }, []);
 
   useEffect(() => {
-    const fetchPosts = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('posts')
-          .select(`
-            *,
-            profiles:user_id (
-              username,
-              avatar_url,
-              full_name
-            )
-          `)
-          .order('created_at', { ascending: false });
-
-        if (error) throw error;
-
-        // Transform the posts to include public URLs
-        const transformedPosts = data?.map((post) => {
-          if (post.image_urls && post.image_urls.length > 0) {
-            const publicUrls = post.image_urls.map((fileName: string) => {
-              const { data: { publicUrl } } = supabase.storage
-                .from('posts')
-                .getPublicUrl(fileName);
-              return publicUrl;
-            });
-            return { ...post, image_urls: publicUrls };
-          }
-          return post;
-        }) || [];
-
-        setPosts(transformedPosts);
-      } catch (error) {
-        console.error('Error fetching posts:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchPosts();
-  }, []);
+  }, [currentUser]); // Re-fetch when currentUser changes
+
+  const fetchComments = async (postId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('comments')
+        .select(`
+          *,
+          profiles:user_id (
+            username,
+            avatar_url,
+            full_name
+          )
+        `)
+        .eq('post_id', postId)
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+      setComments(prev => ({ ...prev, [postId]: data }));
+    } catch (error) {
+      console.error('Error fetching comments:', error);
+    }
+  };
+
+  const handleLike = async (postId: string) => {
+    if (!currentUser) return;
+
+    try {
+      const { data: existingLike } = await supabase
+        .from('likes')
+        .select()
+        .eq('post_id', postId)
+        .eq('user_id', currentUser.id)
+        .single();
+
+      if (existingLike) {
+        // Unlike
+        await supabase
+          .from('likes')
+          .delete()
+          .eq('post_id', postId)
+          .eq('user_id', currentUser.id);
+      } else {
+        // Like
+        await supabase
+          .from('likes')
+          .insert({
+            post_id: postId,
+            user_id: currentUser.id
+          });
+      }
+
+      // Refresh posts to update like count
+      fetchPosts();
+    } catch (error) {
+      console.error('Error toggling like:', error);
+      toast.error('Error updating like');
+    }
+  };
 
   const handleDelete = async (postId: string) => {
     try {
-      // First get the post to get image URLs
       const { data: post } = await supabase
         .from('posts')
         .select('image_urls')
         .eq('id', postId)
         .single();
 
-      // Delete images from storage if they exist
       if (post?.image_urls) {
         for (const fileName of post.image_urls) {
           const { error: storageError } = await supabase.storage
@@ -95,7 +172,6 @@ export default function CommunityPage() {
         }
       }
 
-      // Delete the post from the database
       const { error } = await supabase
         .from('posts')
         .delete()
@@ -103,13 +179,53 @@ export default function CommunityPage() {
 
       if (error) throw error;
       
-      setPosts(posts.filter(post => post.id !== postId));
       toast.success('Post deleted successfully');
+      fetchPosts(); // Fetch fresh data after deletion
     } catch (error) {
       console.error('Error deleting post:', error);
       toast.error('Error deleting post');
     }
   };
+
+  const fetchPopularExplorers = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select(`
+          id,
+          username,
+          full_name,
+          avatar_url,
+          followers:profile_followers(count)
+        `)
+        .order('followers', { ascending: false })
+        .limit(5);
+
+      if (error) throw error;
+
+      // Transform the data to include public URLs and follower count
+      const transformedExplorers = data?.map((explorer) => {
+        const followerCount = explorer.followers?.[0]?.count || 0;
+        const avatarUrl = explorer.avatar_url 
+          ? supabase.storage.from('avatars').getPublicUrl(explorer.avatar_url).data.publicUrl
+          : null;
+
+        return {
+          ...explorer,
+          avatar_url: avatarUrl,
+          follower_count: followerCount
+        };
+      }) || [];
+
+      setPopularExplorers(transformedExplorers);
+    } catch (error) {
+      console.error('Error fetching popular explorers:', error);
+    }
+  };
+
+  useEffect(() => {
+    fetchPopularExplorers();
+  }, []);
 
   return (
     <main className="min-h-screen bg-background">
@@ -197,15 +313,43 @@ export default function CommunityPage() {
                     </div>
                   )}
                   <div className="flex gap-4">
-                    <Button variant="ghost" size="sm">
-                      <ThumbsUp className="w-4 h-4 mr-2" />
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      onClick={() => handleLike(post.id)}
+                    >
+                      <ThumbsUp 
+                        className={`w-4 h-4 mr-2 ${post.user_has_liked ? 'fill-current' : ''}`} 
+                      />
                       {post.likes_count || 0}
                     </Button>
-                    <Button variant="ghost" size="sm">
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      onClick={() => {
+                        setShowComments(prev => ({ ...prev, [post.id]: !prev[post.id] }));
+                        if (!comments[post.id]) {
+                          fetchComments(post.id);
+                        }
+                      }}
+                    >
                       <MessageSquare className="w-4 h-4 mr-2" />
                       {post.comments_count || 0}
                     </Button>
                   </div>
+                  {showComments[post.id] && (
+                    <div className="mt-4">
+                      <CommentSection
+                        postId={post.id}
+                        currentUser={currentUser}
+                        comments={comments[post.id] || []}
+                        onCommentAdded={() => {
+                          fetchComments(post.id);
+                          fetchPosts(); // Refresh post to update comment count
+                        }}
+                      />
+                    </div>
+                  )}
                 </Card>
               ))
             )}
@@ -215,32 +359,30 @@ export default function CommunityPage() {
             <Card className="p-6">
               <h3 className="font-semibold mb-4">Popular Explorers</h3>
               <div className="space-y-4">
-                {[
-                  {
-                    name: "Sarah Johnson",
-                    avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330",
-                    followers: "2.5K"
-                  },
-                  {
-                    name: "Jean Pierre",
-                    avatar: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e",
-                    followers: "1.8K"
-                  }
-                ].map((explorer, index) => (
-                  <div key={index} className="flex items-center gap-4">
-                    <img
-                      src={explorer.avatar}
-                      alt={explorer.name}
-                      className="w-10 h-10 rounded-full object-cover"
-                    />
+                {popularExplorers.map((explorer) => (
+                  <div key={explorer.id} className="flex items-center gap-4">
+                    <Avatar className="h-10 w-10">
+                      <AvatarImage src={explorer.avatar_url} />
+                      <AvatarFallback>
+                        {explorer.username?.slice(0, 2).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
                     <div className="flex-1">
-                      <h4 className="font-medium">{explorer.name}</h4>
+                      <h4 className="font-medium">
+                        {explorer.full_name || explorer.username}
+                      </h4>
                       <div className="flex items-center gap-1 text-sm text-muted-foreground">
                         <Users className="w-3 h-3" />
-                        {explorer.followers} followers
+                        {explorer.follower_count} followers
                       </div>
                     </div>
-                    <Button variant="outline" size="sm">Follow</Button>
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => router.push(`/profile/${explorer.username}`)}
+                    >
+                      View Profile
+                    </Button>
                   </div>
                 ))}
               </div>
