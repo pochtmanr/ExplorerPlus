@@ -8,14 +8,15 @@ import usePlacesAutocomplete, {
 import { Search } from 'lucide-react';
 
 interface PlaceSearchProps {
-  onLocationSelect: (location: {
+  onSelect: (placeData: {
+    name: string;
     address: string;
     coordinates: { lat: number; lng: number };
   }) => void;
   placeholder?: string;
 }
 
-export default function PlaceSearch({ onLocationSelect, placeholder = "Enter destination..." }: PlaceSearchProps) {
+export default function PlaceSearch({ onSelect, placeholder = "Search for a place..." }: PlaceSearchProps) {
   const [isScriptLoaded, setIsScriptLoaded] = useState(false);
   const scriptLoadAttempted = useRef(false);
 
@@ -56,7 +57,12 @@ export default function PlaceSearch({ onLocationSelect, placeholder = "Enter des
     try {
       const results = await getGeocode({ address });
       const { lat, lng } = await getLatLng(results[0]);
-      onLocationSelect({ address, coordinates: { lat, lng } });
+      const placeDetails = {
+        name: results[0].address_components[0].long_name,
+        address: address,
+        coordinates: { lat, lng },
+      };
+      onSelect(placeDetails);
     } catch (error) {
       console.error('Error:', error);
     }
@@ -67,18 +73,18 @@ export default function PlaceSearch({ onLocationSelect, placeholder = "Enter des
       <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
       <input
         type="text"
+        className="place-search w-full pl-9 pr-4 py-2 rounded-md border bg-background"
         placeholder={placeholder}
-        className="w-full pl-9 pr-4 py-2 rounded-md border bg-background"
         value={value}
         onChange={(e) => setValue(e.target.value)}
         disabled={!ready}
       />
-      {status === 'OK' && (
-        <ul className="absolute z-10 w-full mt-1 bg-background border rounded-md shadow-lg">
+      {status === "OK" && (
+        <ul className="absolute z-10 w-full bg-background border rounded-md mt-1">
           {data.map(({ place_id, description }) => (
             <li
               key={place_id}
-              className="px-4 py-2 hover:bg-muted cursor-pointer"
+              className="px-4 py-2 hover:bg-accent cursor-pointer"
               onClick={() => handleSelect(description)}
             >
               {description}

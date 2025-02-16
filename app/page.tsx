@@ -145,7 +145,7 @@ export default function Home() {
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Your Accommodation</label>
                   <PlaceSearch
-                    onLocationSelect={setAccommodation}
+                    onSelect={setAccommodation}
                     placeholder="Enter your accommodation address..."
                   />
                 </div>

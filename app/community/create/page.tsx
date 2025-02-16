@@ -134,7 +134,7 @@ export default function CreatePost() {
                   <span>Location</span>
                 </div>
                 <PlaceSearch
-                  onLocationSelect={setLocation}
+                  onSelect={setLocation}
                   placeholder="Search for a place..."
                 />
                 {location && (

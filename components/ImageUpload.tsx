@@ -4,15 +4,23 @@ import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ImagePlus, X, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { v4 as uuidv4 } from 'uuid'; 
+import { v4 as uuidv4 } from 'uuid';
 
 interface ImageUploadProps {
   value: string[];
   onChange: (urls: string[]) => void;
   multiple?: boolean;
+  bucket?: string;
+  folder?: string;
 }
 
-export function ImageUpload({ value, onChange, multiple = false }: ImageUploadProps) {
+export function ImageUpload({ 
+  value, 
+  onChange, 
+  multiple = false, 
+  bucket = 'avatars',  // default to avatars bucket
+  folder = ''  // optional subfolder
+}: ImageUploadProps) {
   const [loading, setLoading] = useState(false);
 
   const onUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -26,20 +34,19 @@ export function ImageUpload({ value, onChange, multiple = false }: ImageUploadPr
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const fileExt = file.name.split('.').pop();
-        const fileName = `${uuidv4()}.${fileExt}`;
-        const filePath = `explore/${fileName}`;
+        const fileName = `${folder ? `${folder}/` : ''}${uuidv4()}.${fileExt}`;
 
         const { error: uploadError } = await supabase.storage
-          .from('images')
-          .upload(filePath, file);
+          .from(bucket)
+          .upload(fileName, file);
 
         if (uploadError) {
           throw uploadError;
         }
 
         const { data: { publicUrl } } = supabase.storage
-          .from('images')
-          .getPublicUrl(filePath);
+          .from(bucket)
+          .getPublicUrl(fileName);
 
         newUrls.push(publicUrl);
 
@@ -57,12 +64,12 @@ export function ImageUpload({ value, onChange, multiple = false }: ImageUploadPr
   const onRemove = async (urlToRemove: string) => {
     try {
       // Extract file path from URL
-      const path = urlToRemove.split('/').pop();
+      const path = urlToRemove.split(`${bucket}/`).pop();
       if (!path) return;
 
       await supabase.storage
-        .from('images')
-        .remove([`explore/${path}`]);
+        .from(bucket)
+        .remove([path]);
 
       onChange(value.filter(url => url !== urlToRemove));
     } catch (error) {
