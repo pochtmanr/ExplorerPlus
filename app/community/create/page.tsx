@@ -1,11 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { X, Upload, MapPin } from 'lucide-react';
 import PlaceSearch from '@/components/PlaceSearch';
@@ -19,6 +19,31 @@ export default function CreatePost() {
   const [images, setImages] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    // Handle location parameters from explorer
+    const locationParam = searchParams.get('location');
+    const lat = searchParams.get('lat');
+    const lng = searchParams.get('lng');
+    const name = searchParams.get('name');
+    const description = searchParams.get('description');
+
+    if (locationParam && lat && lng) {
+      setLocation({
+        address: locationParam,
+        coordinates: {
+          lat: parseFloat(lat),
+          lng: parseFloat(lng)
+        }
+      });
+
+      // If sharing a specific place, pre-fill the content
+      if (name && description) {
+        setContent(`📍 ${name}\n\n${description}\n\nMy experience:`);
+      }
+    }
+  }, [searchParams]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);

@@ -8,6 +8,7 @@ import ItineraryCard from '@/components/ItineraryCard';
 import DaySelector from '@/components/DaySelector';
 import TransportSelector from '@/components/TransportSelector';
 import { Button } from '@/components/ui/button';
+import { useRouter } from 'next/navigation';
 
 const MapComponent = dynamic(() => import('@/components/Map'), {
   ssr: false,
@@ -26,98 +27,152 @@ export default function Home() {
   const [itineraries, setItineraries] = useState<Array<any>>([]);
   const [selectedDay, setSelectedDay] = useState(1);
   const [isGenerating, setIsGenerating] = useState(false);
+  const router = useRouter();
 
   const generateItinerary = useCallback(async () => {
     if (!accommodation) return;
     setIsGenerating(true);
 
     try {
-      // Simulate AI processing with a delay
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Call the local LLM server
+      const response = await fetch('http://localhost:3002/generate-itinerary', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          location: accommodation,
+          days: numberOfDays,
+          transportModes: transportModes,
+        }),
+      });
 
-      const mockItineraries = Array(numberOfDays)
-        .fill(null)
-        .map((_, dayIndex) => ({
-          day: dayIndex + 1,
-          totalDistance: '8.2 km',
-          totalDuration: '7 hours',
-          startTime: '9:00 AM',
-          endTime: '4:00 PM',
-          places: [
-            {
-              name: 'Your Accommodation',
-              description: 'Starting point',
-              duration: '0 min',
-              address: accommodation.address,
-              type: 'accommodation',
-              coordinates: accommodation.coordinates,
-            },
-            {
-              name: 'Local Cafe',
-              description: 'Start your day with a traditional breakfast',
-              duration: '45 min',
-              address: '123 Sample Street',
-              type: 'food',
-              coordinates: {
-                lat: accommodation.coordinates.lat + 0.01,
-                lng: accommodation.coordinates.lng + 0.01,
-              },
-            },
-            {
-              name: 'Historic Museum',
-              description: 'Explore local history and culture',
-              duration: '2 hours',
-              address: '456 History Lane',
-              type: 'attraction',
-              coordinates: {
-                lat: accommodation.coordinates.lat + 0.02,
-                lng: accommodation.coordinates.lng - 0.01,
-              },
-            },
-            {
-              name: 'City Park',
-              description: 'Relax and enjoy nature in the heart of the city',
-              duration: '1 hour',
-              address: '789 Park Avenue',
-              type: 'outdoor',
-              coordinates: {
-                lat: accommodation.coordinates.lat - 0.01,
-                lng: accommodation.coordinates.lng + 0.02,
-              },
-            },
-            {
-              name: 'Local Restaurant',
-              description: 'Lunch break with local specialties',
-              duration: '1 hour',
-              address: '321 Food Street',
-              type: 'food',
-              coordinates: {
-                lat: accommodation.coordinates.lat - 0.02,
-                lng: accommodation.coordinates.lng - 0.02,
-              },
-            },
-            {
-              name: 'Your Accommodation',
-              description: 'Return point',
-              duration: '0 min',
-              address: accommodation.address,
-              type: 'accommodation',
-              coordinates: accommodation.coordinates,
-            },
-          ],
-        }));
+      if (!response.ok) {
+        throw new Error('Failed to generate itinerary');
+      }
 
-      setItineraries(mockItineraries);
+      const data = await response.json();
+      
+      // Process the itineraries to ensure they have the right format
+      const processedItineraries = data.itineraries.map((itinerary: any) => {
+        // Ensure accommodation is first and last place
+        const places = [
+          {
+            name: 'Your Accommodation',
+            description: 'Starting point',
+            duration: '0 min',
+            address: accommodation.address,
+            type: 'accommodation',
+            coordinates: accommodation.coordinates,
+          },
+          ...itinerary.places,
+          {
+            name: 'Your Accommodation',
+            description: 'Return point',
+            duration: '0 min',
+            address: accommodation.address,
+            type: 'accommodation',
+            coordinates: accommodation.coordinates,
+          }
+        ];
+        
+        return {
+          ...itinerary,
+          places
+        };
+      });
+
+      setItineraries(processedItineraries);
     } catch (error) {
       console.error('Error generating itinerary:', error);
+      // Fallback to mock data if LLM fails
+      generateMockItinerary();
     } finally {
       setIsGenerating(false);
     }
-  }, [accommodation, numberOfDays]);
+  }, [accommodation, numberOfDays, transportModes]);
+
+  // Keep the mock function as fallback
+  const generateMockItinerary = () => {
+    // Your existing mock itinerary generation code
+    const mockItineraries = Array(numberOfDays)
+      .fill(null)
+      .map((_, dayIndex) => ({
+        day: dayIndex + 1,
+        totalDistance: '8.2 km',
+        totalDuration: '7 hours',
+        startTime: '9:00 AM',
+        endTime: '4:00 PM',
+        places: [
+          {
+            name: 'Your Accommodation',
+            description: 'Starting point',
+            duration: '0 min',
+            address: accommodation?.address,
+            type: 'accommodation',
+            coordinates: accommodation?.coordinates,
+          },
+          {
+            name: 'Local Cafe',
+            description: 'Start your day with a traditional breakfast',
+            duration: '45 min',
+            address: '123 Sample Street',
+            type: 'food',
+            coordinates: {
+              lat: accommodation?.coordinates?.lat || 0 + 0.01,
+              lng: accommodation?.coordinates?.lng || 0 + 0.01,
+            },
+          },
+          {
+            name: 'Historic Museum',
+            description: 'Explore local history and culture',
+            duration: '2 hours',
+            address: '456 History Lane',
+            type: 'attraction',
+            coordinates: {
+              lat: accommodation?.coordinates?.lat || 0 + 0.02,
+              lng: accommodation?.coordinates?.lng || 0 - 0.01,
+            },
+          },
+          {
+            name: 'City Park',
+            description: 'Relax and enjoy nature in the heart of the city',
+            duration: '1 hour',
+            address: '789 Park Avenue',
+            type: 'outdoor',
+            coordinates: {
+              lat: accommodation?.coordinates?.lat || 0 - 0.01,
+              lng: accommodation?.coordinates?.lng || 0 + 0.02,
+            },
+          },
+          {
+            name: 'Local Restaurant',
+            description: 'Lunch break with local specialties',
+            duration: '1 hour',
+            address: '321 Food Street',
+            type: 'food',
+            coordinates: {
+              lat: accommodation?.coordinates?.lat || 0 - 0.02,
+              lng: accommodation?.coordinates?.lng || 0 - 0.02,
+            },
+          },
+          {
+            name: 'Your Accommodation',
+            description: 'Return point',
+            duration: '0 min',
+            address: accommodation?.address,
+            type: 'accommodation',
+            coordinates: accommodation?.coordinates,
+          },
+        ],
+      }));
+
+    setItineraries(mockItineraries);
+  };
 
   const currentItinerary = itineraries[selectedDay - 1];
   const markers = currentItinerary?.places.map((place: any) => ({
-    position: [place.coordinates.lat, place.coordinates.lng],
+    position: [place.coordinates?.lat, place.coordinates?.lng],
     popup: place.name,
     type: place.type,
   })) || [];
@@ -207,6 +262,19 @@ export default function Home() {
                         {currentItinerary.startTime} - {currentItinerary.endTime}
                       </div>
                     </div>
+                    <div className="flex justify-end mb-4">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          if (!accommodation) return;
+                          router.push(`/community/create?location=${encodeURIComponent(accommodation.address)}&lat=${accommodation.coordinates.lat}&lng=${accommodation.coordinates.lng}`);
+                        }}
+                        disabled={!accommodation}
+                      >
+                        Share to Community
+                      </Button>
+                    </div>
                     <ItineraryCard places={currentItinerary.places} />
                   </div>
                 )}
@@ -214,7 +282,7 @@ export default function Home() {
             )}
           </div>
 
-          <div className="rounded-lg border bg-card overflow-hidden shadow-sm">
+          <div className="rounded-lg border bg-card overflow-hidden shadow-sm relative z-0">
             <MapComponent
               center={
                 accommodation

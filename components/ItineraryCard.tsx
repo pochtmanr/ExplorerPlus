@@ -1,8 +1,9 @@
 'use client';
 
-import { Clock, MapPin, ExternalLink } from 'lucide-react';
+import { Clock, MapPin, ExternalLink, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { generateGoogleMapsUrl } from '@/lib/utils';
+import { useRouter } from 'next/navigation';
 
 interface Place {
   name: string;
@@ -21,6 +22,8 @@ interface ItineraryCardProps {
 }
 
 export default function ItineraryCard({ places }: ItineraryCardProps) {
+  const router = useRouter();
+
   if (!places?.length) {
     return (
       <div className="space-y-4">
@@ -34,6 +37,10 @@ export default function ItineraryCard({ places }: ItineraryCardProps) {
   const handleOpenInGoogleMaps = () => {
     const url = generateGoogleMapsUrl(places);
     window.open(url, '_blank');
+  };
+
+  const handleShare = (place: Place) => {
+    router.push(`/community/create?location=${encodeURIComponent(place.address)}&lat=${place.coordinates.lat}&lng=${place.coordinates.lng}&name=${encodeURIComponent(place.name)}&description=${encodeURIComponent(place.description)}`);
   };
 
   return (
@@ -56,7 +63,20 @@ export default function ItineraryCard({ places }: ItineraryCardProps) {
             {index + 1}
           </div>
           <div className="space-y-2">
-            <h3 className="font-medium">{place.name}</h3>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="font-medium">{place.name}</h3>
+              {place.type !== 'accommodation' && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => handleShare(place)}
+                  className="flex items-center gap-2"
+                >
+                  <Share2 className="w-4 h-4" />
+                  Share
+                </Button>
+              )}
+            </div>
             <p className="text-sm text-muted-foreground">{place.description}</p>
             <div className="flex items-center gap-4 text-sm text-muted-foreground">
               {place.duration !== '0 min' && (

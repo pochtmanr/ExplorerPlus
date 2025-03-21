@@ -345,22 +345,7 @@ export default function AdminExplorePage() {
     }));
   };
 
-  const handlePlaceImageUpload = (
-    category: keyof FormData['places'],
-    index: number,
-    urls: string[]
-  ) => {
-    console.log('Place image upload:', { category, index, urls });
-    setFormData(prev => ({
-      ...prev,
-      places: {
-        ...prev.places,
-        [category]: prev.places[category as keyof FormData['places']].map((place, i) => 
-          i === index ? { ...place, image_url: urls[0] } : place
-        )
-      }
-    }));
-  };
+
 
   if (loading) {
     return (
@@ -472,7 +457,7 @@ export default function AdminExplorePage() {
                               Add {category.label} Place
                             </Button>
 
-                            {places[category.id as keyof FormData['places']]?.map((place: Place, index: number) => (
+                            {places[category.id]?.map((place: Place, index: number) => (
                               <Card key={`${category}-${index}`} className="overflow-hidden">
                                 {place.image_url && (
                                   <div className="relative aspect-video">

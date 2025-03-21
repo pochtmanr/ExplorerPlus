@@ -12,6 +12,7 @@ import {
   ChevronDown,
   ChevronUp,
   ExternalLink,
+  Share2,
 } from 'lucide-react';
 import { Loader2 } from 'lucide-react';
 import {
@@ -21,6 +22,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useRouter } from 'next/navigation';
 
 type Place = {
   name: string;
@@ -38,6 +40,7 @@ type Place = {
 };
 
 export default function CityDetailsPage({ params }: { params: { slug: string } }) {
+  const router = useRouter();
   const [city, setCity] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [selectedPlace, setSelectedPlace] = useState<Place | null>(null);
@@ -92,6 +95,13 @@ export default function CityDetailsPage({ params }: { params: { slug: string } }
     { id: 'restaurants', label: 'Food & Drinks', icon: '🍽️' },
     { id: 'entertainment', label: 'Entertainment', icon: '🎭' },
   ];
+
+  const handleShare = (place: Place, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+    }
+    router.push(`/community/create?location=${encodeURIComponent(place.address)}&lat=${place.location.lat}&lng=${place.location.lng}&name=${encodeURIComponent(place.name)}&description=${encodeURIComponent(place.short_description)}`);
+  };
 
   if (loading) {
     return (
@@ -183,7 +193,17 @@ export default function CityDetailsPage({ params }: { params: { slug: string } }
                       </div>
                     )}
                     <div className="p-4">
-                      <h3 className="text-lg font-semibold mb-2">{place.name}</h3>
+                      <div className="flex items-center justify-between mb-2">
+                        <h3 className="text-lg font-semibold">{place.name}</h3>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => handleShare(place, e)}
+                          className="h-8 w-8 p-0"
+                        >
+                          <Share2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                       <p className="text-muted-foreground text-sm line-clamp-2">
                         {place.short_description}
                       </p>
@@ -203,7 +223,20 @@ export default function CityDetailsPage({ params }: { params: { slug: string } }
         <Dialog open={!!selectedPlace} onOpenChange={() => setSelectedPlace(null)}>
           <DialogContent className="max-w-3xl">
             <DialogHeader>
-              <DialogTitle>{selectedPlace?.name}</DialogTitle>
+              <div className="flex items-center justify-between">
+                <DialogTitle>{selectedPlace?.name}</DialogTitle>
+                {selectedPlace && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleShare(selectedPlace)}
+                    className="flex items-center gap-2"
+                  >
+                    <Share2 className="h-4 w-4" />
+                    Share
+                  </Button>
+                )}
+              </div>
             </DialogHeader>
             <ScrollArea className="max-h-[80vh]">
               {selectedPlace && (
